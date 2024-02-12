@@ -24,13 +24,11 @@ public:
 protected:
   // Please add any additional state to the ByteStream here, and not to the Writer and Reader interfaces.
   // using static to share the number of write and receive
-  static uint64_t writerWrite;
-  static uint64_t readerRecei;
+  uint64_t writerWrite;
+  uint64_t readerRecei;
   static bool is_closed_var;
   static bool is_finished_var;
-  static std::string tunnel;
-  std::string bufferWrite;
-  std::string bufferRead;
+  std::string buffer;
   uint64_t capacity_;
   bool error_ {};
 };

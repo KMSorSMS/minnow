@@ -4,15 +4,12 @@
 #include <type_traits>
 
 using namespace std;
-uint64_t ByteStream::writerWrite = 0;
-uint64_t ByteStream::readerRecei = 0;
+
 bool ByteStream::is_closed_var = false;
 bool ByteStream::is_finished_var = false;
-string ByteStream::tunnel;
-// string ByteStream::bufferWrite;
-// string ByteStream::bufferRead;
 
-ByteStream::ByteStream( uint64_t capacity ) : capacity_( capacity )
+
+ByteStream::ByteStream( uint64_t capacity ) : writerWrite(0), readerRecei(0),buffer( {} ), capacity_( capacity )
 {
   is_closed_var = false, is_finished_var = false;
 }
@@ -26,12 +23,8 @@ void Writer::push( string data )
 {
   uint64_t writeDatalen = data.length() > available_capacity() ? available_capacity() : data.length();
   writerWrite = writerWrite + writeDatalen;
-  // buffer all the bytes to make sure reliable;
-  bufferWrite = bufferWrite + data;
-  // push all possible to the stream;
-  tunnel = tunnel + bufferWrite.substr( 0, writeDatalen );
-  // 删除掉已经传输的buffer内容
-  bufferWrite = bufferWrite.substr( writeDatalen );
+  // buffer all the bytes possible;
+  buffer = buffer + data.substr( 0, writeDatalen );
   return;
 }
 
@@ -72,20 +65,20 @@ uint64_t Reader::bytes_popped() const
 string_view Reader::peek() const
 {
   // Peek at the next bytes in the buffer
-  string_view sv = tunnel;
+  string_view sv = buffer;
   return sv;
 }
 
 void Reader::pop( uint64_t len )
 {
   // Remove `len` bytes from the buffer
-  bufferRead = bufferRead.substr( len );
+  buffer = buffer.substr( len );
   // 更新rederRecei
   readerRecei = readerRecei + len;
 }
 
 uint64_t Reader::bytes_buffered() const
 {
-  // Your code here.
-  return bufferRead.length();
+  // Number of bytes currently buffered (pushed and not popped)
+  return buffer.length();
 }

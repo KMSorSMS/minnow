@@ -28,7 +28,9 @@ protected:
   static uint64_t readerRecei;
   static bool is_closed_var;
   static bool is_finished_var;
-  static std::string buffer;
+  static std::string tunnel;
+  std::string bufferWrite;
+  std::string bufferRead;
   uint64_t capacity_;
   bool error_ {};
 };

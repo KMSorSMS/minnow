@@ -8,9 +8,14 @@ uint64_t ByteStream::writerWrite = 0;
 uint64_t ByteStream::readerRecei = 0;
 bool ByteStream::is_closed_var = false;
 bool ByteStream::is_finished_var = false;
-string ByteStream::buffer;
+string ByteStream::tunnel;
+// string ByteStream::bufferWrite;
+// string ByteStream::bufferRead;
 
-ByteStream::ByteStream( uint64_t capacity ) : capacity_( capacity ) { is_closed_var = false,is_finished_var = false;}
+ByteStream::ByteStream( uint64_t capacity ) : capacity_( capacity )
+{
+  is_closed_var = false, is_finished_var = false;
+}
 
 bool Writer::is_closed() const
 {
@@ -21,7 +26,12 @@ void Writer::push( string data )
 {
   uint64_t writeDatalen = data.length() > available_capacity() ? available_capacity() : data.length();
   writerWrite = writerWrite + writeDatalen;
-  buffer = buffer + data.substr( 0, writeDatalen );
+  // buffer all the bytes to make sure reliable;
+  bufferWrite = bufferWrite + data;
+  // push all possible to the stream;
+  tunnel = tunnel + bufferWrite.substr( 0, writeDatalen );
+  // 删除掉已经传输的buffer内容
+  bufferWrite = bufferWrite.substr( writeDatalen );
   return;
 }
 
@@ -39,7 +49,7 @@ uint64_t Writer::available_capacity() const
 
 uint64_t Writer::bytes_pushed() const
 {
-  // Your code here.
+  // Total number of bytes cumulatively pushed to the stream
   return writerWrite;
 }
 
@@ -55,24 +65,27 @@ bool Reader::is_finished() const
 
 uint64_t Reader::bytes_popped() const
 {
-  // Your code here.
-  return {};
+  // Total number of bytes cumulatively popped from stream
+  return readerRecei;
 }
 
 string_view Reader::peek() const
 {
-  // Your code here.
-  return {};
+  // Peek at the next bytes in the buffer
+  string_view sv = tunnel;
+  return sv;
 }
 
 void Reader::pop( uint64_t len )
 {
-  // Your code here.
-  (void)len;
+  // Remove `len` bytes from the buffer
+  bufferRead = bufferRead.substr( len );
+  // 更新rederRecei
+  readerRecei = readerRecei + len;
 }
 
 uint64_t Reader::bytes_buffered() const
 {
   // Your code here.
-  return buffer.length();
+  return bufferRead.length();
 }

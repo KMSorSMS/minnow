@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <string_view>
 
@@ -24,11 +25,13 @@ public:
 protected:
   // Please add any additional state to the ByteStream here, and not to the Writer and Reader interfaces.
   // using static to share the number of write and receive
-  uint64_t writerWrite;
-  uint64_t readerRecei;
-  static bool is_closed_var;
-  static bool is_finished_var;
-  std::string buffer;
+  uint64_t pushedBytes{0};
+  uint64_t popedBytes{0};
+  uint64_t bufferBytes{0};
+  bool is_closed_var{false};
+  std::deque<std::string> data_queue_{};
+  // std::deque<std::string_view> view_queue_{};
+  std::string_view viewData{};
   uint64_t capacity_;
   bool error_ {};
 };

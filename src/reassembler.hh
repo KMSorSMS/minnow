@@ -50,7 +50,7 @@ private:
   uint64_t first_unassembled_index { 0 };  // i.e. the index of the next string,starting from zero;
   uint64_t first_unacceptable_index { 0 }; // initial from the capacity of output_
   uint64_t bytes_pending_num { 0 };
-  bool has_last{false};
+  bool has_last { false };
   std::pmr::set<std::pair<uint64_t, std::string>> data_set {};
   uint64_t find_replace_addStr(
     std::string& input_str,

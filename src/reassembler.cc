@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <type_traits>
+#include <utility>
 
 using namespace std;
 
@@ -25,11 +26,12 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
     bytes_pending_num += find_replace_addStr( data, first_index );
     // check if the nextBytes come then write bytes
     while ( !data_set.empty() && first_index == first_unassembled_index ) {
-      output_.writer().push( data_set.begin()->second );
       // 更新pendding数量
       bytes_pending_num -= data_set.begin()->second.size();
       // 更新跟踪信息：first_unassembled_index、first_unacceptable_index
       first_unassembled_index += data_set.begin()->second.size();
+      //发送push数据
+      output_.writer().push( move(data_set.begin()->second) );
       data_set.erase(data_set.begin());
       first_index = data_set.begin()->first;// 走到下一个元素
     }
@@ -37,7 +39,6 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
   // if this is the last substring and it's not cut the tail
   if ( has_last && data_set.empty() ) {
     output_.writer().close();
-    bytes_pending_num = 0;
     return;
   }
 }
@@ -56,8 +57,9 @@ uint64_t Reassembler::find_replace_addStr( string& input_str, const uint64_t& fi
 {
   // 对于最特殊的 data_set是空的情况，直接插入：
   if ( data_set.begin() == data_set.end() ) {
-    data_set.insert( { first_index, input_str } );
-    return input_str.size();
+    auto size = input_str.size();
+    data_set.insert( { first_index, move(input_str) } );
+    return size;
   }
   set<pair<uint64_t, string>>::iterator iter_down = data_set.upper_bound( { first_index, "" } );
   set<pair<uint64_t, string>>::iterator iter_up = data_set.upper_bound( { first_index + input_str.size(), "" } );
@@ -81,7 +83,8 @@ uint64_t Reassembler::find_replace_addStr( string& input_str, const uint64_t& fi
     rightUpindex = max(iter_down->first+iter_down->second.size(),start_index+opeStr.size());
     //截取
     if(leftDownIndex!=leftUpIndex){
-      data_set.insert({leftDownIndex,opeStr.substr(0,leftUpIndex-leftDownIndex)});
+      auto insertStr = opeStr.substr(0,leftUpIndex-leftDownIndex);
+      data_set.insert({leftDownIndex,move(insertStr)});
     }
     //更新start、opeStr
     opeStr = rightDownIndex==rightUpindex ? "" : opeStr.substr(rightDownIndex-start_index,rightUpindex-rightDownIndex);
@@ -89,8 +92,8 @@ uint64_t Reassembler::find_replace_addStr( string& input_str, const uint64_t& fi
     count_insert += leftUpIndex-leftDownIndex;
   }
   if(!opeStr.empty()){
-    data_set.insert({rightDownIndex,opeStr});
     count_insert += opeStr.size();
+    data_set.insert({rightDownIndex,move(opeStr)});
   }
   return count_insert;
 }

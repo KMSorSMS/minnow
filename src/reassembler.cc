@@ -24,24 +24,14 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
     // using function to strip and insert the data
     bytes_pending_num += find_replace_addStr( data, first_index );
     // check if the nextBytes come then write bytes
-    bool has_pushed = false;
-    auto iter = data_set.begin();
-    if ( first_index == first_unassembled_index ) {
-      has_pushed = true;
-    }
-    while ( iter != data_set.end() && first_index == first_unassembled_index ) {
-      output_.writer().push( iter->second );
+    while ( !data_set.empty() && first_index == first_unassembled_index ) {
+      output_.writer().push( data_set.begin()->second );
       // 更新pendding数量
-      bytes_pending_num -= iter->second.size();
+      bytes_pending_num -= data_set.begin()->second.size();
       // 更新跟踪信息：first_unassembled_index、first_unacceptable_index
-      first_unassembled_index += iter->second.size();
-      // 走到下一个iter
-      iter++;
-      first_index = iter->first;
-    }
-    if ( has_pushed ) {
-      // 去除数据
-      data_set.erase( data_set.begin(), iter );
+      first_unassembled_index += data_set.begin()->second.size();
+      data_set.erase(data_set.begin());
+      first_index = data_set.begin()->first;// 走到下一个元素
     }
   }
   // if this is the last substring and it's not cut the tail

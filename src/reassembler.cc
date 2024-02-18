@@ -10,10 +10,12 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
   // judge if empty and need to check out of capacity
   // within capacity: first_index <= first_unacceptable_index
   if ( is_last_substring ) {
-    last_byte_index = first_index + data.size();
     has_last = true;
   }
   first_unacceptable_index = first_unassembled_index + output_.writer().available_capacity();
+  if(first_index < first_unassembled_index && first_index + data.size() <= first_unassembled_index){//说明是之前assemble过的
+    return;
+  }
   if ( !data.empty() && first_index < first_unacceptable_index ) {
     // data和first需要一个预处理，主要是处理已经发送的data，也就是在first_unassembled_index之前的index内容去掉
     if ( first_index < first_unassembled_index && first_index + data.size() > first_unassembled_index ) {
@@ -22,35 +24,37 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
     }
     if ( data.size() + first_index > first_unacceptable_index ) { // 在这里把data截断
       data = data.substr( 0, first_unacceptable_index - first_index );
+      has_last = false;
     }
     // using function to strip and insert the data
     bytes_pending_num += find_replace_addStr( data, first_index );
     // check if the nextBytes come then write bytes
     bool has_pushed = false;
     auto iter = data_set.begin();
-    if(first_index == first_unassembled_index){
+    if ( first_index == first_unassembled_index ) {
       has_pushed = true;
     }
-    while ( iter!=data_set.end() && first_index == first_unassembled_index ) {
+    while ( iter != data_set.end() && first_index == first_unassembled_index ) {
       output_.writer().push( iter->second );
       // 更新pendding数量
       bytes_pending_num -= iter->second.size();
       // 更新跟踪信息：first_unassembled_index、first_unacceptable_index
       first_unassembled_index += iter->second.size();
       first_unacceptable_index = first_unassembled_index + output_.writer().available_capacity();
-      //走到下一个iter
+      // 走到下一个iter
       iter++;
       first_index = iter->first;
     }
-    if(has_pushed){
-      //去除数据
-      data_set.erase(data_set.begin(), iter);
+    if ( has_pushed ) {
+      // 去除数据
+      data_set.erase( data_set.begin(), iter );
     }
   }
   // if this is the last substring and it's not cut the tail
   // 判断是不是到了last_byte
-  if ( first_unassembled_index == last_byte_index && has_last ) {
+  if ( has_last && data_set.empty() ) {
     output_.writer().close();
+    bytes_pending_num = 0;
     return;
   }
 }

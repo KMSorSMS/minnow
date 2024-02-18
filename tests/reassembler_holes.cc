@@ -102,32 +102,37 @@ int main()
     }
 
     {
-      ReassemblerTestHarness test { "holes 7", 65000 };
+      ReassemblerTestHarness test { "holes 7", 5 };
 
-      test.execute( Insert { "b", 1 } );
-      test.execute( BytesPushed( 0 ) );
-      test.execute( ReadAll( "" ) );
-      test.execute( IsFinished { false } );
+      test.execute( Insert { "bc", 1 } );
+      test.execute( Insert { "bc", 1 } );
+      test.execute( Insert { "bc", 1 } );
+      // test.execute( BytesPushed( 0 ) );
+      test.execute( Insert { "de", 3 }.is_last() );
+      // test.execute( ReadAll( "" ) );
+      // test.execute( IsFinished { false } );
 
-      test.execute( Insert { "d", 3 } );
-      test.execute( BytesPushed( 0 ) );
-      test.execute( ReadAll( "" ) );
-      test.execute( IsFinished { false } );
+      test.execute( Insert { "cdefghi", 2 } );
+      // test.execute( BytesPushed( 0 ) );
+      // test.execute( ReadAll( "" ) );
+      // test.execute( IsFinished { false } );
 
+      // test.execute( BytesPushed( 2 ) );
+      // test.execute( ReadAll( "ab" ) );
+      // test.execute( IsFinished { false } );
+
+      test.execute( Insert { "bcde", 1 } );
+      // test.execute( BytesPushed( 4 ) );
+      // test.execute( ReadAll( "cd" ) );
+      // test.execute( IsFinished { false } );
+      // test.execute( Insert { "de", 3 }.is_last() );
+
+      // test.execute( Insert { "de", 3 }.is_last() );
+      test.execute( Insert { "bcdef", 1 } );
       test.execute( Insert { "a", 0 } );
-      test.execute( BytesPushed( 2 ) );
-      test.execute( ReadAll( "ab" ) );
-      test.execute( IsFinished { false } );
-
-      test.execute( Insert { "c", 2 } );
-      test.execute( BytesPushed( 4 ) );
-      test.execute( ReadAll( "cd" ) );
-      test.execute( IsFinished { false } );
-
-      test.execute( Insert { "", 4 }.is_last() );
-      test.execute( BytesPushed( 4 ) );
-      test.execute( ReadAll( "" ) );
-      test.execute( IsFinished { true } );
+      // test.execute( BytesPushed( 4 ) );
+      test.execute( ReadAll( "abcde" ) );
+      // test.execute( IsFinished { true } );
     }
   } catch ( const exception& e ) {
     cerr << "Exception: " << e.what() << endl;

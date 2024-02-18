@@ -7,139 +7,116 @@ using namespace std;
 
 void Reassembler::insert( uint64_t first_index, string data, bool is_last_substring )
 {
-  // judge if empty and need to check out of capacity
-  // within capacity: first_index <= first_unacceptable_index
-  if ( is_last_substring ) {
-    last_byte_index = first_index + data.size();
-    has_last = true;
-  }
-  first_unacceptable_index = first_unassembled_index + output_.writer().available_capacity();
-  if ( !data.empty() && first_index < first_unacceptable_index ) {
-    // data和first需要一个预处理，主要是处理已经发送的data，也就是在first_unassembled_index之前的index内容去掉
-    if ( first_index < first_unassembled_index && first_index + data.size() > first_unassembled_index ) {
-      data = data.substr( first_unassembled_index - first_index ); // 截取到能够接受的index之后
-      first_index = first_unassembled_index;
+  if ( data.empty() ) {
+    if ( is_last_substring ) {
+      outputUse.close();
     }
-    if ( data.size() + first_index > first_unacceptable_index ) { // 在这里把data截断
-      data = data.substr( 0, first_unacceptable_index - first_index );
-    }
-    // using function to strip and insert the data
-    bytes_pending_num += find_replace_addStr( data, first_index );
-    // check if the nextBytes come then write bytes
-    bool has_pushed = false;
-    auto iter = data_set.begin();
-    if(first_index == first_unassembled_index){
-      has_pushed = true;
-    }
-    while ( iter!=data_set.end() && first_index == first_unassembled_index ) {
-      output_.writer().push( iter->second );
-      // 更新pendding数量
-      bytes_pending_num -= iter->second.size();
-      // 更新跟踪信息：first_unassembled_index、first_unacceptable_index
-      first_unassembled_index += iter->second.size();
-      first_unacceptable_index = first_unassembled_index + output_.writer().available_capacity();
-      //走到下一个iter
-      iter++;
-      first_index = iter->first;
-    }
-    if(has_pushed){
-      //去除数据
-      data_set.erase(data_set.begin(), iter);
-    }
-  }
-  // if this is the last substring and it's not cut the tail
-  // 判断是不是到了last_byte
-  if ( first_unassembled_index == last_byte_index && has_last ) {
-    output_.writer().close();
     return;
+  }
+
+  if ( outputUse.available_capacity() == 0 ) {
+    return;
+  }
+  auto const end_index = first_index + data.size();
+  auto const first_unacceptable = first_unassembled_index_ + outputUse.available_capacity();
+
+  // data is not in [first_unassembled_index, first_unacceptable)
+  if ( end_index <= first_unassembled_index_ || first_index >= first_unacceptable ) {
+    return;
+  }
+
+  // if part of data is out of capacity, then truncate it
+  if ( end_index > first_unacceptable ) {
+    data = data.substr( 0, first_unacceptable - first_index );
+    // if truncated, it won't be last_substring
+    is_last_substring = false;
+  }
+
+  // unordered bytes, save it in buffer and return
+  if ( first_index > first_unassembled_index_ ) {
+    insert_into_buffer( first_index, std::move( data ), is_last_substring );
+    return;
+  }
+
+  // remove useless prefix of data (i.e. bytes which are already assembled)
+  if ( first_index < first_unassembled_index_ ) {
+    data = data.substr( first_unassembled_index_ - first_index );
+  }
+
+  // here we have first_index == first_unassembled_index_
+  first_unassembled_index_ += data.size();
+  outputUse.push( std::move( data ) );
+
+  if ( is_last_substring ) {
+    outputUse.close();
+  }
+
+  if ( !buffer_.empty() && buffer_.begin()->first <= first_unassembled_index_ ) {
+    pop_from_buffer( outputUse );
   }
 }
 // How many bytes are stored in the Reassembler itself?
 uint64_t Reassembler::bytes_pending() const
 {
-  return bytes_pending_num;
+  return buffer_size_;
 }
-/*
-大致思路是，使用set的方法，找到第一个小于等于输入字符串index的元素（需要使用upper_bound，得到迭代器并且往前推一个）
-然后再找到第一个大于等于index+len-1的元素，然后这两个元素之间的所有元素，都会参与切割这个字符串
-切割操作是：从第一个元素开始，字符串分割为(0,index_ele-index)和(index_ele-index+ele.size)
-对于前一个分割，直接加入set，对于后一个，继续进行分割。
-*/
-uint64_t Reassembler::find_replace_addStr( string& input_str, const uint64_t& first_index )
+
+void Reassembler::insert_into_buffer( const uint64_t first_index, std::string&& data, const bool is_last_substring )
 {
-  // 对于最特殊的 data_set是空的情况，直接插入：
-  if ( data_set.begin() == data_set.end() ) {
-    data_set.insert( { first_index, input_str } );
-    return input_str.size();
-  }
-  set<pair<uint64_t, string>>::iterator iter_down = data_set.upper_bound( { first_index, "" } );
-  set<pair<uint64_t, string>>::iterator iter_up = data_set.upper_bound( { first_index + input_str.size(), "" } );
-  // 不管是否存在有index比first_index大，都会让iter_down往前走一个，这个index一定是比first_index小或等于的，除非所有的都比first_index大
-  // 边界严谨一点
-  if ( iter_down != data_set.begin() ) { // 因为如果上界是开始，说明全部都比插入的index大，不移动iter，反之才移动
-    iter_down--;
+  auto begin_index = first_index;
+  const auto end_index = first_index + data.size();
+
+  for ( auto it = buffer_.begin(); it != buffer_.end() && begin_index < end_index; ) {
+    if ( it->first <= begin_index ) {
+      begin_index = max( begin_index, it->first + it->second.size() );
+      ++it;
+      continue;
+    }
+
+    if ( begin_index == first_index && end_index <= it->first ) {
+      buffer_size_ += data.size();
+      buffer_.emplace( it, first_index, std::move( data ) );
+      return;
+    }
+    const auto right_index = min( it->first, end_index );
+    const auto len = right_index - begin_index;
+    buffer_.emplace( it, begin_index, data.substr( begin_index - first_index, len ) );
+    buffer_size_ += len;
+    begin_index = right_index;
   }
 
-  uint64_t count_insert = 0; // 记录插入的bytes数
-  uint64_t start_index = first_index;
-  string leftStr = {};
-  string rightStr = input_str;
-  if ( iter_down->second.size() + iter_down->first <= start_index ) { // 说明底界和插入部分没有交集，就往上走
-    iter_down++;
+  if ( begin_index < end_index ) {
+    buffer_size_ += end_index - begin_index;
+    buffer_.emplace_back( begin_index, data.substr( begin_index - first_index ) );
   }
-  // 开始遍历分割字符串
-  for ( ; iter_down != iter_up; iter_down++ ) {
-    // 先对边界情况进行检验，看看是否有在iter_down的左右边是否有字符串
-    if ( start_index < iter_down->first ) { // 左边有值
-      leftStr = rightStr.substr( 0, iter_down->first - start_index );
-    } else {
-      leftStr = {};
-    }
-    if ( start_index + rightStr.size() > iter_down->first + iter_down->second.size()
-         && iter_down->second.size() + iter_down->first > start_index ) { // 右边有值
-      rightStr = rightStr.substr( iter_down->second.size() - start_index + iter_down->first );
-    } else {
-      rightStr = {};
-    }
-    count_insert += leftStr.size();
-    if ( !leftStr.empty() ) {
-      data_set.insert( { start_index, leftStr } );
-    }
-    if ( !rightStr.empty() ) {
-      start_index = iter_down->first + iter_down->second.size();
-    } else {
+
+  if ( is_last_substring ) {
+    has_last_ = true;
+  }
+}
+void Reassembler::pop_from_buffer( Writer& outputWriter )
+{
+  for ( auto it = buffer_.begin(); it != buffer_.end(); ) {
+    if ( it->first > first_unassembled_index_ ) {
       break;
     }
-  }
-  // 如果iter_down取值为end，说明到头了，直接把rightStr插入
-  if ( iter_down == data_set.end() ) {
-    // 这里就需要把右边也插入了
-    data_set.insert( { start_index, rightStr } );
-    count_insert += rightStr.size();
-    return count_insert;
-  }
-  // 对于最后的iter_down == iter_up != end的情况，要再来一次切割.ps:这个情况好像能把空的情况合并了
-  if ( iter_down == iter_up && iter_down != data_set.end() && !rightStr.empty() ) {
-    // 先对边界情况进行检验，看看是否有在iter_down的左右边是否有字符串
-    if ( start_index < iter_down->first ) { // 左边有值
-      leftStr = rightStr.substr( 0, iter_down->first - start_index );
+    // it->first <= first_unassembled_index_
+    const auto end = it->first + it->second.size();
+    if ( end <= first_unassembled_index_ ) {
+      buffer_size_ -= it->second.size();
     } else {
-      leftStr = {};
+      auto data = std::move( it->second );
+      buffer_size_ -= data.size();
+      if ( it->first < first_unassembled_index_ ) {
+        data = data.substr( first_unassembled_index_ - it->first );
+      }
+      first_unassembled_index_ += data.size();
+      outputWriter.push( std::move( data ) );
     }
-    if ( start_index + rightStr.size() > iter_down->first + iter_down->second.size() ) { // 右边有值
-      rightStr = rightStr.substr( iter_down->second.size() - start_index + iter_down->first );
-    } else {
-      rightStr = {};
-    }
-    count_insert += leftStr.size();
-    if ( !leftStr.empty() ) {
-      data_set.insert( { start_index, leftStr } );
-    }
-    if ( !rightStr.empty() ) {
-      // 这里就需要把右边也插入了
-      data_set.insert( { start_index, rightStr } );
-      count_insert += rightStr.size();
-    }
+    it = buffer_.erase( it );
   }
-  return count_insert;
+
+  if ( buffer_.empty() && has_last_ ) {
+    outputWriter.close();
+  }
 }

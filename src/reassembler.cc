@@ -7,17 +7,11 @@ using namespace std;
 
 void Reassembler::insert( uint64_t first_index, string data, bool is_last_substring )
 {
+  has_last = is_last_substring ? true:has_last;
   // judge if empty and need to check out of capacity
-  // within capacity: first_index <= first_unacceptable_index
-  if ( is_last_substring ) {
-    has_last = true;
-  }
   first_unacceptable_index = first_unassembled_index + output_.writer().available_capacity();
-  if ( first_index < first_unassembled_index
-       && first_index + data.size() <= first_unassembled_index ) { // 说明是之前assemble过的
-    return;
-  }
-  if ( !data.empty() && first_index < first_unacceptable_index ) {
+  // 数据非空的、没有超过可接受范围的、没有之前被完整assemble过的才会进入insert处理
+  if ( !data.empty() && first_index < first_unacceptable_index && first_index + data.size() > first_unassembled_index ) {
     // data和first需要一个预处理，主要是处理已经发送的data，也就是在first_unassembled_index之前的index内容去掉
     if ( first_index < first_unassembled_index && first_index + data.size() > first_unassembled_index ) {
       data = data.substr( first_unassembled_index - first_index ); // 截取到能够接受的index之后
@@ -41,7 +35,6 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
       bytes_pending_num -= iter->second.size();
       // 更新跟踪信息：first_unassembled_index、first_unacceptable_index
       first_unassembled_index += iter->second.size();
-      first_unacceptable_index = first_unassembled_index + output_.writer().available_capacity();
       // 走到下一个iter
       iter++;
       first_index = iter->first;
@@ -52,7 +45,6 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
     }
   }
   // if this is the last substring and it's not cut the tail
-  // 判断是不是到了last_byte
   if ( has_last && data_set.empty() ) {
     output_.writer().close();
     bytes_pending_num = 0;

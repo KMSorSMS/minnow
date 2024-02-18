@@ -64,7 +64,6 @@ private:
   bool has_last_ { false };
   // insert valid but un-ordered data into buffer
   void insert_into_buffer( uint64_t first_index, std::string&& data, bool is_last_substring );
-  Writer outputUse = output_.writer();
   // pop invalid bytes and insert valid bytes into writer
-  void pop_from_buffer( Writer& output );
+  void pop_from_buffer( );
 };

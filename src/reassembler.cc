@@ -9,16 +9,16 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
 {
   if ( data.empty() ) {
     if ( is_last_substring ) {
-      outputUse.close();
+      output_.writer().close();
     }
     return;
   }
 
-  if ( outputUse.available_capacity() == 0 ) {
+  if ( output_.writer().available_capacity() == 0 ) {
     return;
   }
   auto const end_index = first_index + data.size();
-  auto const first_unacceptable = first_unassembled_index_ + outputUse.available_capacity();
+  auto const first_unacceptable = first_unassembled_index_ + output_.writer().available_capacity();
 
   // data is not in [first_unassembled_index, first_unacceptable)
   if ( end_index <= first_unassembled_index_ || first_index >= first_unacceptable ) {
@@ -45,14 +45,14 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
 
   // here we have first_index == first_unassembled_index_
   first_unassembled_index_ += data.size();
-  outputUse.push( std::move( data ) );
+  output_.writer().push( std::move( data ) );
 
   if ( is_last_substring ) {
-    outputUse.close();
+    output_.writer().close();
   }
 
   if ( !buffer_.empty() && buffer_.begin()->first <= first_unassembled_index_ ) {
-    pop_from_buffer( outputUse );
+    pop_from_buffer(  );
   }
 }
 // How many bytes are stored in the Reassembler itself?
@@ -94,7 +94,7 @@ void Reassembler::insert_into_buffer( const uint64_t first_index, std::string&& 
     has_last_ = true;
   }
 }
-void Reassembler::pop_from_buffer( Writer& outputWriter )
+void Reassembler::pop_from_buffer(  )
 {
   for ( auto it = buffer_.begin(); it != buffer_.end(); ) {
     if ( it->first > first_unassembled_index_ ) {
@@ -111,12 +111,12 @@ void Reassembler::pop_from_buffer( Writer& outputWriter )
         data = data.substr( first_unassembled_index_ - it->first );
       }
       first_unassembled_index_ += data.size();
-      outputWriter.push( std::move( data ) );
+      output_.writer().push( std::move( data ) );
     }
     it = buffer_.erase( it );
   }
 
   if ( buffer_.empty() && has_last_ ) {
-    outputWriter.close();
+    output_.writer().close();
   }
 }

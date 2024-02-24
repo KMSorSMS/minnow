@@ -1,0 +1,51 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cmake",
+			"label": "build all",
+			"command": "build",
+			"targets": [
+				
+			],
+			"group": "build",
+			"problemMatcher": ["$gcc"],
+			"detail": "CMake buile all the target"
+		},
+		{
+			"type": "cmake",
+			"label": "build byte_stream_test",
+			"command": "build",
+			"targets": [
+				"byte_stream_basics","byte_stream_capacity","byte_stream_one_write","byte_stream_two_writes",
+				"byte_stream_many_writes","byte_stream_stress_test"
+			],
+			"group": "build",
+			"problemMatcher": [],
+			"detail": "CMake template build task"
+		},
+		{
+			"type": "cmake",
+			"label": "build reassembler_test",
+			"command": "build",
+			"targets": [
+				"reassembler_single","reassembler_cap","reassembler_seq","reassembler_holes","reassembler_overlapping","reassembler_win"
+			],
+			"group": "build",
+			"problemMatcher": [],
+			"detail": "CMake template build task"
+		},
+		{
+			"type": "shell",
+			"label": "run_lab2Check",
+			"command":"cmake",
+			"args": [
+				"--build",
+				"${workspaceFolder}/build",
+				"--target",
+				"check2"
+				],
+			"problemMatcher": [],
+		}
+	]
+}

@@ -72,7 +72,7 @@
             "name": "debug wrapping_intergers",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceRoot}/build/tests/wrapping_integers_unwrap",
+            "program": "${workspaceRoot}/build/tests/recv_special",
             "args": ["cs144.keithw.org","/hello"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

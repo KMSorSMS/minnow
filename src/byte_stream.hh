@@ -11,7 +11,8 @@ class Writer;
 class ByteStream
 {
 public:
-  explicit ByteStream( uint64_t capacity ); //explicit 限制了只能通过显式调用构造函数来创建对象，而不能通过隐式转换来创建对象
+  explicit ByteStream(
+    uint64_t capacity ); // explicit 限制了只能通过显式调用构造函数来创建对象，而不能通过隐式转换来创建对象
 
   // Helper functions (provided) to access the ByteStream's Reader and Writer interfaces
   Reader& reader();
@@ -25,13 +26,13 @@ public:
 protected:
   // Please add any additional state to the ByteStream here, and not to the Writer and Reader interfaces.
   // using static to share the number of write and receive
-  uint64_t pushedBytes{0};
-  uint64_t popedBytes{0};
-  uint64_t bufferBytes{0};
-  bool is_closed_var{false};
-  std::deque<std::string> data_queue_{};
+  uint64_t pushedBytes { 0 };
+  uint64_t popedBytes { 0 };
+  uint64_t bufferBytes { 0 };
+  bool is_closed_var { false };
+  std::deque<std::string> data_queue_ {};
   // std::deque<std::string_view> view_queue_{};
-  std::string_view viewData{};
+  std::string_view viewData {};
   uint64_t capacity_;
   bool error_ {};
 };

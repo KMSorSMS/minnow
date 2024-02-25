@@ -3,6 +3,7 @@
 #include "reassembler.hh"
 #include "tcp_receiver_message.hh"
 #include "tcp_sender_message.hh"
+#include <cstdint>
 
 class TCPReceiver
 {
@@ -27,4 +28,8 @@ public:
 
 private:
   Reassembler reassembler_;
+  std::optional<Wrap32> zero_point{};
+  uint64_t next_bytes{0};//i.e ackno or first unassembled index
+  bool has_init{false};//用于判定是否初始化了连接，因为TCP建立连接后才能得到关键的信息用于交换数据
+  bool has_rst{false};
 };

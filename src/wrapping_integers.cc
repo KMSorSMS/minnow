@@ -16,8 +16,9 @@ uint64_t Wrap32::unwrap( Wrap32 zero_point, uint64_t checkpoint ) const
   offset = offset + 4294967296 * ( checkpoint / 4294967296 );
   // 比较大小，选取distance最近的
   uint32_t dis = offset > checkpoint ? offset - checkpoint : checkpoint - offset;
-  //采用比较骚的压行方式，算是对于底层的理解吧。看右边部分的dis是否小
-  offset =  dis > offset + 4294967296 - checkpoint ? dis = offset + 4294967296 - checkpoint,offset + 4294967296:offset;
+  // 采用比较骚的压行方式，算是对于底层的理解吧。看右边部分的dis是否小
+  offset = dis > offset + 4294967296 - checkpoint ? dis = offset + 4294967296 - checkpoint,
+  offset + 4294967296                             : offset;
   // 看左边部分的dis是否小
   return offset = offset > 4294967296 && dis > checkpoint - offset + 4294967296 ? offset - 4294967296 : offset;
 }

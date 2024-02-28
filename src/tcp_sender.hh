@@ -59,6 +59,7 @@ private:
   // 开一个pair的vector，把在传输层切片但是没有得到ack的数据保存起来
   std::vector<std::pair<uint64_t, TCPSenderMessage>> transButUnack {};
   uint16_t shake_times { 1 };//连接的三次握手状态记录
+  bool need2Fin{false};
 
   // void transmitFunc(const TCPSenderMessage& msg);//用在push方法传递的参数
 };

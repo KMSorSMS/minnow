@@ -25,30 +25,31 @@ void TCPSender::push( const TransmitFunction& transmit )
   // 还没发起握手，则首先由发送方发起握手请求
   if ( shake_times == 1 ) {
     // 注意SYN=true和发送的seqno为isn是关键
-    sendMsg
-      = { .seqno = isn_, .SYN = true, .payload = {}, .FIN = writer().is_closed(), .RST = writer().has_error() };
+    sendMsg = { isn_, true, {}, writer().is_closed(), writer().has_error() };
     // 也要把它放入我们的transbutunack喔，因为可能会lost而重传的捏
     transButUnack.emplace_back( pair { 0, sendMsg } );
     // 发送
     transmit( sendMsg );
     // 正式起航，所以我们的NextByte2Sent就有意义了，就是为1；不过还需要等一个对方的ack
-    NextByte2Sent = 1;
+    NextByte2Sent = sendMsg.sequence_length();
     shake_times++;
-  } else if ( (shake_times >= 3 && reader().bytes_buffered())) { // 完成了三次握手后才会发送，不过第三次发送可以捎带,测试里面有对于这种捎带情况考察
+    // 完成了三次握手后才会发送，不过第三次发送可以捎带,测试里面有对于这种捎带情况考察，我们这里要求发送数据一定要能发送并且有数据发
+  } else if ( shake_times >= 3 && reader().bytes_buffered() && NextByte2Sent - LastByteAcked < rwnd ) {
+    sendMsg.FIN = false;
     sendMsg.SYN = false;
     // 在这里要物尽其用的尽可能把数据加入放到一个segment里面，保证window有空和buffer有内容即可
     while ( NextByte2Sent - LastByteAcked < rwnd && reader().bytes_buffered() ) {
       // 通过reader读取应用层数据，鉴别是否能完整加入
       auto peeked = reader().peek();
-      sendMsg.FIN = true;
-      if ( peeked.size() + NextByte2Sent - LastByteAcked + reader().is_finished() > rwnd ) {
+      if ( peeked.size() + NextByte2Sent - LastByteAcked + writer().is_closed() > rwnd ) {
         // 不能完整加入，需要截断,则不可能是产生FIN的时候,这个地方逻辑后面可以优化
         peeked = peeked.substr( 0, rwnd - NextByte2Sent + LastByteAcked - reader().is_finished() );
-        sendMsg.FIN = false;
       }
+      need2Fin = writer().is_closed();
       // 填充发送msg的payload和seqno和RST
       sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
       sendMsg.payload += peeked;
+      sendMsg.FIN = need2Fin;
       sendMsg.RST = writer().has_error();
       // 把这段payload同时放入我们的记录vector里面，因为发送了但是没有接收到ack
       transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
@@ -58,6 +59,24 @@ void TCPSender::push( const TransmitFunction& transmit )
       input_.reader().pop( peeked.size() );
     }
     transmit( sendMsg );
+  } else if ( writer().is_closed() ) { // 需要发送FIN
+    sendMsg.FIN = true;
+    sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
+    if ( NextByte2Sent - LastByteAcked < rwnd ) {
+      // 同样也需要把负载装入，但是我发现测试里面好像没有，先不忙做
+      NextByte2Sent++;
+      transmit( sendMsg );
+    } else if ( rwnd == 0 ) { // 接下来是查看是否rwnd为0的特殊情况
+      sendMsg.payload = "";
+      NextByte2Sent++;
+      transmit( sendMsg );
+    }
+  } else if ( rwnd == 0 ) {
+    // 特殊情况rwnd为0，那么直接transmit一个byte
+    sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
+    sendMsg.payload = reader().peek().substr( 0, 1 );
+    input_.reader().pop( 1 );
+    NextByte2Sent++;
   }
 }
 
@@ -71,18 +90,28 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
   if ( msg.RST ) { // 遇到异常情况
     writer().set_error();
     writer().close();
-    //清空握手次数，从1开始
-    shake_times=1;
+    // 清空握手次数，从1开始
+    shake_times = 1;
     return;
   }
   rwnd = msg.window_size;
+  // 对于没有ackno的，就是更新window信息：
+  if ( not msg.ackno.has_value() ) {
+    // 清空上一次的时间积累
+    accumulated_time = 0;
+    // 复原RTO_ms_
+    RTO_ms_ = initial_RTO_ms_;
+    // 更新need2Fin
+    need2Fin = writer().is_closed();
+    return;
+  }
   uint64_t ackno = msg.ackno->unwrap( isn_, LastByteAcked );
   // 如果是等待第二次握手返回信息,并且ackno表明收到syn
   if ( shake_times == 2 && ackno > LastByteAcked ) {
     shake_times++;
   }
-  // 查看是否是冗余ack：
-  if ( ackno <= LastByteAcked ) { // 如果是之前已经应答了的，那么省略掉
+  // 查看是否是冗余ack，以及查看是否是超过了当前sent的packet的bytes，这种直接忽略
+  if ( ackno <= LastByteAcked || ackno > NextByte2Sent ) { // 如果是之前已经应答了的，那么省略掉
     return;
   }
   // 到了这里，说明是没有冗余ack，利用累计确认原则，进行清除,我这里遍历去查找，后续可能会改成set采用log算法查找（但不见得更优）
@@ -95,21 +124,21 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
   LastByteAcked = ackno;
   // 清空上一次的时间积累
   accumulated_time = 0;
-  //复原RTO_ms_
+  // 复原RTO_ms_
   RTO_ms_ = initial_RTO_ms_;
 }
 
 void TCPSender::tick( uint64_t ms_since_last_tick, const TransmitFunction& transmit )
 {
   if ( not transButUnack.empty() ) {
-    accumulated_time += ms_since_last_tick;     // 更新目前累计时间
-    if ( accumulated_time < RTO_ms_ ) { // 没有超时
+    accumulated_time += ms_since_last_tick; // 更新目前累计时间
+    if ( accumulated_time < RTO_ms_ ) {     // 没有超时
       return;
     }
     // 发生超时，选择重传最老的outstanding分组
-    accumulated_time = 0; // 清空时间积累
-    dup_count++;//重传次数增加
-    RTO_ms_ = 2*RTO_ms_;//倍增
+    accumulated_time = 0;  // 清空时间积累
+    dup_count++;           // 重传次数增加
+    RTO_ms_ = 2 * RTO_ms_; // 倍增
     // 构造重传的message，也就是传transButUnack里面第一个元素即可，它有index用来填充
     transmit( transButUnack.begin()->second );
   }

@@ -102,7 +102,7 @@ void TCPSender::push( const TransmitFunction& transmit )
 
 TCPSenderMessage TCPSender::make_empty_message() const
 {
-  return TCPSenderMessage { .seqno = Wrap32::wrap( NextByte2Sent, isn_ ) };
+  return TCPSenderMessage { .seqno = Wrap32::wrap( NextByte2Sent, isn_ ),.RST=writer().has_error() };
 }
 
 void TCPSender::receive( const TCPReceiverMessage& msg )
@@ -129,12 +129,12 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
     shake_times++;
   }
   // 查看是否是冗余ack，以及查看是否是超过了当前sent的packet的bytes，这种直接忽略
-  if ( ackno <= LastByteAcked || ackno > NextByte2Sent ) { // 如果是之前已经应答了的，那么省略掉
+  if ( ackno <= LastByteAcked || ackno > NextByte2Sent || transButUnack.begin()->first+transButUnack.begin()->second.sequence_length() > ackno ) { // 如果是之前已经应答了的，那么省略掉
     return;
   }
   // 到了这里，说明是没有冗余ack，利用累计确认原则，进行清除,我这里遍历去查找，后续可能会改成set采用log算法查找（但不见得更优）
   vector<pair<uint64_t, TCPSenderMessage>>::iterator iter = transButUnack.begin();
-  while ( iter != transButUnack.end() && iter->first < ackno )
+  while ( iter != transButUnack.end() && iter->first+iter->second.sequence_length() <= ackno )
     iter++; // 出来的是刚好大于ack的，也就是没有被确认的
   
   transButUnack.erase( transButUnack.begin(), iter ); // 删除确认段之前的

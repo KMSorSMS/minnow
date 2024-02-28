@@ -81,6 +81,20 @@
             "MIMode": "gdb",
             "miDebuggerPath":"/usr/bin/gdb",
             "preLaunchTask": "run_lab2Check",
+        },
+        {
+            "name": "debug tcp_sender",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/tests/send_window",
+            "args": ["cs144.keithw.org","/hello"],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath":"/usr/bin/gdb",
+            "preLaunchTask": "run_lab3Check",
         }
     ]
 }

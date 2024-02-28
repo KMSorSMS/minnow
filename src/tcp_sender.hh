@@ -10,13 +10,15 @@
 #include <memory>
 #include <optional>
 #include <queue>
+#include <string>
+#include <utility>
 
 class TCPSender
 {
 public:
   /* Construct TCP sender with given default Retransmission Timeout and possible ISN */
   TCPSender( ByteStream&& input, Wrap32 isn, uint64_t initial_RTO_ms )
-    : input_( std::move( input ) ), isn_( isn ), initial_RTO_ms_( initial_RTO_ms )
+    : input_( std::move( input ) ), isn_( isn ), initial_RTO_ms_( initial_RTO_ms ),RTO_ms_(initial_RTO_ms_)
   {}
 
   /* Generate an empty TCPSenderMessage */
@@ -47,5 +49,16 @@ private:
   // Variables initialized in constructor
   ByteStream input_;
   Wrap32 isn_;
+  uint16_t rwnd { 0 };
+  uint64_t dup_count { 0 }; // 计数冗余，老实说我觉得64位有点多余
   uint64_t initial_RTO_ms_;
+  uint64_t RTO_ms_;
+  uint64_t accumulated_time { 0 }; // 累计时间，用于计算超时
+  uint64_t NextByte2Sent {1};    // absolute sequence number denote the next Bytes to be sent
+  uint64_t LastByteAcked {0};    //  absolute sequence number denote the latest last bytes that have acked
+  // 开一个pair的vector，把在传输层切片但是没有得到ack的数据保存起来
+  std::vector<std::pair<uint64_t, TCPSenderMessage>> transButUnack {};
+  uint16_t shake_times { 1 };//连接的三次握手状态记录
+
+  // void transmitFunc(const TCPSenderMessage& msg);//用在push方法传递的参数
 };

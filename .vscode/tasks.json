@@ -46,6 +46,18 @@
 				"check2"
 				],
 			"problemMatcher": [],
+		},
+		{
+			"type": "shell",
+			"label": "run_lab3Check",
+			"command":"cmake",
+			"args": [
+				"--build",
+				"${workspaceFolder}/build",
+				"--target",
+				"check3"
+				],
+			"problemMatcher": [],
 		}
 	]
 }

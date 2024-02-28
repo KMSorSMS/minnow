@@ -14,7 +14,7 @@ void TCPReceiver::receive( TCPSenderMessage message )
     reader().set_error();
     return;
   }
-  //这里多考虑的是可能最开始的segment来的没有SYN，那就不能接收，必须先来SYN字段的，给了zero_point信息过后才能接收
+  // 这里多考虑的是可能最开始的segment来的没有SYN，那就不能接收，必须先来SYN字段的，给了zero_point信息过后才能接收
   if ( message.SYN && !zero_point.has_value() ) {
     reassembler_.insert( message.seqno.unwrap( message.seqno, next_bytes ), message.payload, message.FIN );
     zero_point = move( message.seqno );
@@ -32,6 +32,6 @@ TCPReceiverMessage TCPReceiver::send() const
   return TCPReceiverMessage { zero_point.has_value() ? Wrap32::wrap( next_bytes, zero_point.value() ) : zero_point,
                               static_cast<uint16_t>( writer().available_capacity() > UINT16_MAX
                                                        ? UINT16_MAX
-                                                       : static_cast<uint16_t>( writer().available_capacity() ) ),
+                                                       : writer().available_capacity() ),
                               reader().has_error() };
 }

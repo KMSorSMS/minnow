@@ -49,7 +49,7 @@ private:
   // Variables initialized in constructor
   ByteStream input_;
   Wrap32 isn_;
-  uint16_t rwnd { 0 };
+  uint16_t rwnd { 1 };
   uint64_t dup_count { 0 }; // 计数冗余，老实说我觉得64位有点多余
   uint64_t initial_RTO_ms_;
   uint64_t RTO_ms_;
@@ -59,7 +59,7 @@ private:
   // 开一个pair的vector，把在传输层切片但是没有得到ack的数据保存起来
   std::vector<std::pair<uint64_t, TCPSenderMessage>> transButUnack {};
   uint16_t shake_times { 1 };//连接的三次握手状态记录
-  bool need2Fin{false};
-
+  bool need2Fin{true};
+  bool has_trans_win0_{false};
   // void transmitFunc(const TCPSenderMessage& msg);//用在push方法传递的参数
 };

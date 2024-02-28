@@ -37,19 +37,25 @@ void TCPSender::push( const TransmitFunction& transmit )
   } else if ( shake_times >= 3 && reader().bytes_buffered() && NextByte2Sent - LastByteAcked < rwnd ) {
     sendMsg.FIN = false;
     sendMsg.SYN = false;
-    // 在这里要物尽其用的尽可能把数据加入放到一个segment里面，保证window有空和buffer有内容即可
-    while ( NextByte2Sent - LastByteAcked < rwnd && reader().bytes_buffered() ) {
+    // 在这里要物尽其用的尽可能把数据加入放到一个segment里面，保证window有空和buffer有内容即可,并且大小不能超过设定payload最大值
+    while ( NextByte2Sent - LastByteAcked < rwnd && reader().bytes_buffered()
+            && sendMsg.payload.size() < TCPConfig::MAX_PAYLOAD_SIZE ) {
       // 通过reader读取应用层数据，鉴别是否能完整加入
       auto peeked = reader().peek();
-      if ( peeked.size() + NextByte2Sent - LastByteAcked + writer().is_closed() > rwnd ) {
+      if ( peeked.size() + NextByte2Sent - LastByteAcked + writer().is_closed() > rwnd
+           || peeked.size() + sendMsg.payload.size() > TCPConfig::MAX_PAYLOAD_SIZE ) {
+        auto size = min( (uint64_t)( rwnd + LastByteAcked - NextByte2Sent ),
+                         (uint64_t)( TCPConfig::MAX_PAYLOAD_SIZE - sendMsg.payload.size() ) );
         // 不能完整加入，需要截断,则不可能是产生FIN的时候,这个地方逻辑后面可以优化
-        peeked = peeked.substr( 0, rwnd - NextByte2Sent + LastByteAcked - reader().is_finished() );
+        peeked = peeked.substr( 0, size );
+        // 因为前面限制得到这里一定能完整传，并且这个时候如果需要传FIN，就把FIN也传了
+      } else if ( writer().is_closed() && need2Fin ) {
+        sendMsg.FIN = true;
+        need2Fin = false; // 不再需要push Fin了
       }
-      need2Fin = writer().is_closed();
       // 填充发送msg的payload和seqno和RST
       sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
       sendMsg.payload += peeked;
-      sendMsg.FIN = need2Fin;
       sendMsg.RST = writer().has_error();
       // 把这段payload同时放入我们的记录vector里面，因为发送了但是没有接收到ack
       transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
@@ -57,26 +63,40 @@ void TCPSender::push( const TransmitFunction& transmit )
       NextByte2Sent += sendMsg.sequence_length();
       // 从应用层的bytestream中去掉peeked
       input_.reader().pop( peeked.size() );
+      if ( sendMsg.payload.size() == TCPConfig::MAX_PAYLOAD_SIZE ) {
+        transmit( sendMsg );
+        sendMsg.payload.clear();
+      }
     }
-    transmit( sendMsg );
-  } else if ( writer().is_closed() ) { // 需要发送FIN
+    if ( not sendMsg.payload.empty() ) {
+      transmit( sendMsg );
+    }
+  } else if ( writer().is_closed() && need2Fin && rwnd != 0 ) { // 需要发送FIN
     sendMsg.FIN = true;
     sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
     if ( NextByte2Sent - LastByteAcked < rwnd ) {
-      // 同样也需要把负载装入，但是我发现测试里面好像没有，先不忙做
-      NextByte2Sent++;
-      transmit( sendMsg );
-    } else if ( rwnd == 0 ) { // 接下来是查看是否rwnd为0的特殊情况
-      sendMsg.payload = "";
-      NextByte2Sent++;
-      transmit( sendMsg );
+      need2Fin = false;
+    } else {
+      return;
     }
-  } else if ( rwnd == 0 ) {
+    // 把这段payload同时放入我们的记录vector里面，因为发送了但是没有接收到ack
+    transmit( sendMsg );
+    transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
+    NextByte2Sent++;
+  } else if ( rwnd == 0 && !has_trans_win0_ ) {
     // 特殊情况rwnd为0，那么直接transmit一个byte
     sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
-    sendMsg.payload = reader().peek().substr( 0, 1 );
-    input_.reader().pop( 1 );
+    if ( !reader().is_finished() ) {
+      sendMsg.payload = reader().peek().substr( 0, 1 );
+      input_.reader().pop( 1 );
+    } else {
+      sendMsg.FIN = true;
+      need2Fin = false;
+    }
+    transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
     NextByte2Sent++;
+    transmit( sendMsg );
+    has_trans_win0_ = true;
   }
 }
 
@@ -101,8 +121,6 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
     accumulated_time = 0;
     // 复原RTO_ms_
     RTO_ms_ = initial_RTO_ms_;
-    // 更新need2Fin
-    need2Fin = writer().is_closed();
     return;
   }
   uint64_t ackno = msg.ackno->unwrap( isn_, LastByteAcked );
@@ -118,6 +136,7 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
   vector<pair<uint64_t, TCPSenderMessage>>::iterator iter = transButUnack.begin();
   while ( iter != transButUnack.end() && iter->first < ackno )
     iter++; // 出来的是刚好大于ack的，也就是没有被确认的
+  
   transButUnack.erase( transButUnack.begin(), iter ); // 删除确认段之前的
   dup_count = 0;                                      // 清空重传次数积累
   // 更新LastByteAcked
@@ -126,6 +145,9 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
   accumulated_time = 0;
   // 复原RTO_ms_
   RTO_ms_ = initial_RTO_ms_;
+  // 复原has_trans_win0
+  if ( has_trans_win0_ )
+    has_trans_win0_ = false;
 }
 
 void TCPSender::tick( uint64_t ms_since_last_tick, const TransmitFunction& transmit )
@@ -136,9 +158,9 @@ void TCPSender::tick( uint64_t ms_since_last_tick, const TransmitFunction& trans
       return;
     }
     // 发生超时，选择重传最老的outstanding分组
-    accumulated_time = 0;  // 清空时间积累
-    dup_count++;           // 重传次数增加
-    RTO_ms_ = 2 * RTO_ms_; // 倍增
+    accumulated_time = 0;                        // 清空时间积累
+    dup_count++;                                 // 重传次数增加
+    RTO_ms_ = rwnd == 0 ? RTO_ms_ : 2 * RTO_ms_; // 倍增
     // 构造重传的message，也就是传transButUnack里面第一个元素即可，它有index用来填充
     transmit( transButUnack.begin()->second );
   }

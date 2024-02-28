@@ -86,7 +86,7 @@
             "name": "debug tcp_sender",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceRoot}/build/tests/send_extra",
+            "program": "${workspaceRoot}/build/tests/send_close",
             "args": ["cs144.keithw.org","/hello"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

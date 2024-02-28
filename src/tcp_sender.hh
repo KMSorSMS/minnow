@@ -54,12 +54,12 @@ private:
   uint64_t initial_RTO_ms_;
   uint64_t RTO_ms_;
   uint64_t accumulated_time { 0 }; // 累计时间，用于计算超时
-  uint64_t NextByte2Sent {1};    // absolute sequence number denote the next Bytes to be sent
+  uint64_t NextByte2Sent {0};    // absolute sequence number denote the next Bytes to be sent
   uint64_t LastByteAcked {0};    //  absolute sequence number denote the latest last bytes that have acked
   // 开一个pair的vector，把在传输层切片但是没有得到ack的数据保存起来
   std::vector<std::pair<uint64_t, TCPSenderMessage>> transButUnack {};
-  uint16_t shake_times { 1 };//连接的三次握手状态记录
   bool need2Fin{true};
   bool has_trans_win0_{false};
+  bool SYN{true};
   // void transmitFunc(const TCPSenderMessage& msg);//用在push方法传递的参数
 };

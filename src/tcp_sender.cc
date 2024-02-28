@@ -22,24 +22,12 @@ uint64_t TCPSender::consecutive_retransmissions() const
 void TCPSender::push( const TransmitFunction& transmit )
 {
   TCPSenderMessage sendMsg;
-  // 还没发起握手，则首先由发送方发起握手请求
-  if ( shake_times == 1 ) {
-    // 注意SYN=true和发送的seqno为isn是关键
-    sendMsg = { isn_, true, {}, writer().is_closed(), writer().has_error() };
-    // 也要把它放入我们的transbutunack喔，因为可能会lost而重传的捏
-    transButUnack.emplace_back( pair { 0, sendMsg } );
-    // 发送
-    transmit( sendMsg );
-    // 正式起航，所以我们的NextByte2Sent就有意义了，就是为1；不过还需要等一个对方的ack
-    NextByte2Sent = sendMsg.sequence_length();
-    shake_times++;
-    // 完成了三次握手后才会发送，不过第三次发送可以捎带,测试里面有对于这种捎带情况考察，我们这里要求发送数据一定要能发送并且有数据发
-  } else if ( shake_times >= 3 && reader().bytes_buffered() && NextByte2Sent - LastByteAcked < rwnd ) {
+  if ( ( SYN || reader().bytes_buffered() ) && NextByte2Sent - LastByteAcked < rwnd ) {
     sendMsg.FIN = false;
-    sendMsg.SYN = false;
+    sendMsg.SYN = SYN;
     // 在这里要物尽其用的尽可能把数据加入放到一个segment里面，保证window有空和buffer有内容即可,并且大小不能超过设定payload最大值
-    while ( NextByte2Sent - LastByteAcked < rwnd && reader().bytes_buffered()
-            && sendMsg.payload.size() < TCPConfig::MAX_PAYLOAD_SIZE ) {
+    while ( NextByte2Sent - LastByteAcked < rwnd && sendMsg.payload.size() < TCPConfig::MAX_PAYLOAD_SIZE
+            && SYN + reader().bytes_buffered() > 0 ) {
       // 通过reader读取应用层数据，鉴别是否能完整加入
       auto peeked = reader().peek();
       if ( peeked.size() + NextByte2Sent - LastByteAcked + writer().is_closed() > rwnd
@@ -49,9 +37,9 @@ void TCPSender::push( const TransmitFunction& transmit )
         // 不能完整加入，需要截断,则不可能是产生FIN的时候,这个地方逻辑后面可以优化
         peeked = peeked.substr( 0, size );
         // 因为前面限制得到这里一定能完整传，并且这个时候如果需要传FIN，就把FIN也传了
-      } else if ( writer().is_closed() && need2Fin ) {
+      } else if ( writer().is_closed() ) {
+        need2Fin = false;
         sendMsg.FIN = true;
-        need2Fin = false; // 不再需要push Fin了
       }
       // 填充发送msg的payload和seqno和RST
       sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
@@ -66,10 +54,14 @@ void TCPSender::push( const TransmitFunction& transmit )
       if ( sendMsg.payload.size() == TCPConfig::MAX_PAYLOAD_SIZE ) {
         transmit( sendMsg );
         sendMsg.payload.clear();
+        sendMsg.FIN = false;
+        sendMsg.SYN = false;
       }
+      SYN = false;
     }
-    if ( not sendMsg.payload.empty() ) {
+    if ( sendMsg.sequence_length() != 0 ) {
       transmit( sendMsg );
+      SYN = false;
     }
   } else if ( writer().is_closed() && need2Fin && rwnd != 0 ) { // 需要发送FIN
     sendMsg.FIN = true;
@@ -102,7 +94,7 @@ void TCPSender::push( const TransmitFunction& transmit )
 
 TCPSenderMessage TCPSender::make_empty_message() const
 {
-  return TCPSenderMessage { .seqno = Wrap32::wrap( NextByte2Sent, isn_ ),.RST=writer().has_error() };
+  return TCPSenderMessage { .seqno = Wrap32::wrap( NextByte2Sent, isn_ ), .RST = writer().has_error() };
 }
 
 void TCPSender::receive( const TCPReceiverMessage& msg )
@@ -110,8 +102,6 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
   if ( msg.RST ) { // 遇到异常情况
     writer().set_error();
     writer().close();
-    // 清空握手次数，从1开始
-    shake_times = 1;
     return;
   }
   rwnd = msg.window_size;
@@ -124,19 +114,17 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
     return;
   }
   uint64_t ackno = msg.ackno->unwrap( isn_, LastByteAcked );
-  // 如果是等待第二次握手返回信息,并且ackno表明收到syn
-  if ( shake_times == 2 && ackno > LastByteAcked ) {
-    shake_times++;
-  }
   // 查看是否是冗余ack，以及查看是否是超过了当前sent的packet的bytes，这种直接忽略
-  if ( ackno <= LastByteAcked || ackno > NextByte2Sent || transButUnack.begin()->first+transButUnack.begin()->second.sequence_length() > ackno ) { // 如果是之前已经应答了的，那么省略掉
+  if ( ackno <= LastByteAcked || ackno > NextByte2Sent
+       || transButUnack.begin()->first + transButUnack.begin()->second.sequence_length()
+            > ackno ) { // 如果是之前已经应答了的，那么省略掉
     return;
   }
   // 到了这里，说明是没有冗余ack，利用累计确认原则，进行清除,我这里遍历去查找，后续可能会改成set采用log算法查找（但不见得更优）
   vector<pair<uint64_t, TCPSenderMessage>>::iterator iter = transButUnack.begin();
-  while ( iter != transButUnack.end() && iter->first+iter->second.sequence_length() <= ackno )
+  while ( iter != transButUnack.end() && iter->first + iter->second.sequence_length() <= ackno )
     iter++; // 出来的是刚好大于ack的，也就是没有被确认的
-  
+
   transButUnack.erase( transButUnack.begin(), iter ); // 删除确认段之前的
   dup_count = 0;                                      // 清空重传次数积累
   // 更新LastByteAcked

@@ -18,40 +18,6 @@ uint64_t TCPSender::consecutive_retransmissions() const
 {
   return dup_count;
 }
-// 根据当前情况来产生一个最大的segment能被发送
-void TCPSender::FindMaxSeg( TCPSenderMessage& sendMsg )
-{
-  // 条件就是不超过最大payload限制，不超过rwnd，然后不停从reader里面读取
-  // 有个最大的问题就是FIN的捎带，怎么带？它要占一个byte在rwnd里面，最开始就加入它吗？
-  auto peeked = reader().peek();
-  auto space = rwnd - NextByte2Sent + LastByteAcked;
-  // 新加入的能够完整存放，就直接一直存,能在这里处理完数据是最好的，也就是触发is_finished而退出，不然就要切割
-  while ( sendMsg.sequence_length() + peeked.size() <= space
-          && peeked.size() + sendMsg.payload.size() <= TCPConfig::MAX_PAYLOAD_SIZE && !peeked.empty() ) {
-    sendMsg.payload += peeked;
-    // 弹出加入的peek部分
-    input_.reader().pop( peeked.size() );
-    // 更新peeked
-    peeked = reader().peek();
-  }
-  // 退出来，检查是否已经把内容吸收完毕,否则需要切割
-  // 理一下思路：如果peek里面有内容，不能直接加入，可以切割，但是这里有细节，
-  // 没接收完成，因为目前已经占满或者有空，只是不够大，但是有FIN，那么FIN退出，加入peeked
-  if ( not peeked.empty() ) {
-    auto size = min( space - sendMsg.sequence_length() + sendMsg.FIN,
-                     TCPConfig::MAX_PAYLOAD_SIZE - sendMsg.payload.size() );
-    peeked = peeked.substr( 0, size ); // 多加入一位，由于FIN产生
-    sendMsg.payload += peeked;
-    input_.reader().pop( peeked.size() );
-    sendMsg.FIN = false;
-  }
-  sendMsg.RST = writer().has_error();
-  sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
-  transButUnack.emplace_back( sendMsg );
-  NextByte2Sent += sendMsg.sequence_length();
-  //这个FIN的变量很关键，解决发送多个FIN的问题，因为发送了FIN后，可能会收到ACK，这个时候再次push，如果不设置这里，就会重复push一次FIN
-  FIN = FIN ? !sendMsg.FIN : false;
-}
 
 void TCPSender::push( const TransmitFunction& transmit )
 {
@@ -110,7 +76,8 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
   }
   uint64_t ackno = msg.ackno->unwrap( isn_, LastByteAcked );
   // 查看是否是冗余ack，以及查看是否是超过了当前sent的packet的bytes，这种直接忽略
-  if ( ackno <= LastByteAcked || ackno > NextByte2Sent ) { // 如果是之前已经应答了的或者说ack了一个还没有发送的序列，那么省略掉
+  if ( ackno <= LastByteAcked
+       || ackno > NextByte2Sent ) { // 如果是之前已经应答了的或者说ack了一个还没有发送的序列，那么省略掉
     return;
   }
   // 到了这里，说明是没有冗余ack，利用累计确认原则，进行清除,我这里遍历去查找，后续可能会改成set采用log算法查找（但不见得更优）
@@ -147,4 +114,39 @@ void TCPSender::tick( uint64_t ms_since_last_tick, const TransmitFunction& trans
     // 构造重传的message，也就是传transButUnack里面第一个元素即可，它有index用来填充
     transmit( transButUnack[0] );
   }
+}
+
+// 根据当前情况来产生一个最大的segment能被发送
+void TCPSender::FindMaxSeg( TCPSenderMessage& sendMsg )
+{
+  // 条件就是不超过最大payload限制，不超过rwnd，然后不停从reader里面读取
+  // 有个最大的问题就是FIN的捎带，怎么带？它要占一个byte在rwnd里面，最开始就加入它吗？
+  auto peeked = reader().peek();
+  auto space = rwnd - NextByte2Sent + LastByteAcked;
+  // 新加入的能够完整存放，就直接一直存,能在这里处理完数据是最好的，也就是触发is_finished而退出，不然就要切割
+  while ( sendMsg.sequence_length() + peeked.size() <= space
+          && peeked.size() + sendMsg.payload.size() <= TCPConfig::MAX_PAYLOAD_SIZE && !peeked.empty() ) {
+    sendMsg.payload += peeked;
+    // 弹出加入的peek部分
+    input_.reader().pop( peeked.size() );
+    // 更新peeked
+    peeked = reader().peek();
+  }
+  // 退出来，检查是否已经把内容吸收完毕,否则需要切割
+  // 理一下思路：如果peek里面有内容，不能直接加入，可以切割，但是这里有细节，
+  // 没接收完成，因为目前已经占满或者有空，只是不够大，但是有FIN，那么FIN退出，加入peeked
+  if ( not peeked.empty() ) {
+    auto size = min( space - sendMsg.sequence_length() + sendMsg.FIN,
+                     TCPConfig::MAX_PAYLOAD_SIZE - sendMsg.payload.size() );
+    peeked = peeked.substr( 0, size ); // 多加入一位，由于FIN产生
+    sendMsg.payload += peeked;
+    input_.reader().pop( peeked.size() );
+    sendMsg.FIN = false;
+  }
+  sendMsg.RST = writer().has_error();
+  sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
+  transButUnack.emplace_back( sendMsg );
+  NextByte2Sent += sendMsg.sequence_length();
+  // 这个FIN的变量很关键，解决发送多个FIN的问题，因为发送了FIN后，可能会收到ACK，这个时候再次push，如果不设置这里，就会重复push一次FIN
+  FIN = FIN ? !sendMsg.FIN : false;
 }

@@ -62,5 +62,4 @@ private:
   bool SYN{true};
   bool FIN{true};
   void FindMaxSeg(TCPSenderMessage& sendMsg);
-  // void transmitFunc(const TCPSenderMessage& msg);//用在push方法传递的参数
 };

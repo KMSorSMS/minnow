@@ -1,5 +1,6 @@
 #include "address.hh"
 #include "socket.hh"
+#include "tcp_minnow_socket.hh"
 
 #include <cstdio>
 #include <cstdlib>
@@ -16,7 +17,7 @@ void get_URL( const string& host, const string& path )
   Address addre = Address( host, "http" );
   // 接下来就可以通过TCP协议，发送连接请求,注意到进程的socket是和一个port
   // bind一起的，这里初始化的socket还没有bind任何进程
-  TCPSocket tsocket = TCPSocket();
+  CS144TCPSocket tsocket = CS144TCPSocket();
   // 原本应该这里bind一个port,但是客户端是不需要主动做这个操作的，只需要发起连接的时候由操作系统创建一个即可
   tsocket.connect( addre );
   // 连接成功过后，发送get请求

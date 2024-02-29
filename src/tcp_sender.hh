@@ -57,7 +57,7 @@ private:
   uint64_t NextByte2Sent {0};    // absolute sequence number denote the next Bytes to be sent
   uint64_t LastByteAcked {0};    //  absolute sequence number denote the latest last bytes that have acked
   // 开一个pair的vector，把在传输层切片但是没有得到ack的数据保存起来
-  std::vector<std::pair<uint64_t, TCPSenderMessage>> transButUnack {};
+  std::vector<TCPSenderMessage> transButUnack {};
   bool has_trans_win0_{false};
   bool SYN{true};
   bool FIN{true};

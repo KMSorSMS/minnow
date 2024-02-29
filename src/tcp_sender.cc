@@ -47,8 +47,9 @@ void TCPSender::FindMaxSeg( TCPSenderMessage& sendMsg )
   }
   sendMsg.RST = writer().has_error();
   sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
-  transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
+  transButUnack.emplace_back( sendMsg );
   NextByte2Sent += sendMsg.sequence_length();
+  //这个FIN的变量很关键，解决发送多个FIN的问题，因为发送了FIN后，可能会收到ACK，这个时候再次push，如果不设置这里，就会重复push一次FIN
   FIN = FIN ? !sendMsg.FIN : false;
 }
 
@@ -79,7 +80,7 @@ void TCPSender::push( const TransmitFunction& transmit )
     } else {
       sendMsg.FIN = true;
     }
-    transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
+    transButUnack.emplace_back( sendMsg );
     NextByte2Sent++;
     transmit( sendMsg );
     has_trans_win0_ = true;
@@ -109,27 +110,27 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
   }
   uint64_t ackno = msg.ackno->unwrap( isn_, LastByteAcked );
   // 查看是否是冗余ack，以及查看是否是超过了当前sent的packet的bytes，这种直接忽略
-  if ( ackno <= LastByteAcked || ackno > NextByte2Sent
-       || transButUnack.begin()->first + transButUnack.begin()->second.sequence_length()
-            > ackno ) { // 如果是之前已经应答了的，那么省略掉
+  if ( ackno <= LastByteAcked || ackno > NextByte2Sent ) { // 如果是之前已经应答了的或者说ack了一个还没有发送的序列，那么省略掉
     return;
   }
   // 到了这里，说明是没有冗余ack，利用累计确认原则，进行清除,我这里遍历去查找，后续可能会改成set采用log算法查找（但不见得更优）
-  vector<pair<uint64_t, TCPSenderMessage>>::iterator iter = transButUnack.begin();
-  while ( iter != transButUnack.end() && iter->first + iter->second.sequence_length() <= ackno )
+  vector<TCPSenderMessage>::iterator iter = transButUnack.begin();
+  while ( iter != transButUnack.end()
+          && iter->seqno.unwrap( isn_, LastByteAcked ) + iter->sequence_length() <= ackno )
     iter++; // 出来的是刚好大于ack的，也就是没有被确认的
-
-  transButUnack.erase( transButUnack.begin(), iter ); // 删除确认段之前的
-  dup_count = 0;                                      // 清空重传次数积累
-  // 更新LastByteAcked
-  LastByteAcked = ackno;
-  // 清空上一次的时间积累
-  accumulated_time = 0;
-  // 复原RTO_ms_
-  RTO_ms_ = initial_RTO_ms_;
-  // 复原has_trans_win0
-  if ( has_trans_win0_ )
-    has_trans_win0_ = false;
+  if ( iter != transButUnack.begin() ) {
+    transButUnack.erase( transButUnack.begin(), iter ); // 删除确认段之前的
+    dup_count = 0;                                      // 清空重传次数积累
+    // 更新LastByteAcked
+    LastByteAcked = ackno;
+    // 清空上一次的时间积累
+    accumulated_time = 0;
+    // 复原RTO_ms_
+    RTO_ms_ = initial_RTO_ms_;
+    // 复原has_trans_win0
+    if ( has_trans_win0_ )
+      has_trans_win0_ = false;
+  }
 }
 
 void TCPSender::tick( uint64_t ms_since_last_tick, const TransmitFunction& transmit )
@@ -142,8 +143,8 @@ void TCPSender::tick( uint64_t ms_since_last_tick, const TransmitFunction& trans
     // 发生超时，选择重传最老的outstanding分组
     accumulated_time = 0;                        // 清空时间积累
     dup_count++;                                 // 重传次数增加
-    RTO_ms_ = rwnd == 0 ? RTO_ms_ : 2 * RTO_ms_; // 倍增
+    RTO_ms_ = rwnd == 0 ? RTO_ms_ : 2 * RTO_ms_; // 倍增,对于rwnd为0 的时候不倍增时间
     // 构造重传的message，也就是传transButUnack里面第一个元素即可，它有index用来填充
-    transmit( transButUnack.begin()->second );
+    transmit( transButUnack[0] );
   }
 }

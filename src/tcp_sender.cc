@@ -18,63 +18,58 @@ uint64_t TCPSender::consecutive_retransmissions() const
 {
   return dup_count;
 }
+// 根据当前情况来产生一个最大的segment能被发送
+void TCPSender::FindMaxSeg( TCPSenderMessage& sendMsg )
+{
+  // 条件就是不超过最大payload限制，不超过rwnd，然后不停从reader里面读取
+  // 有个最大的问题就是FIN的捎带，怎么带？它要占一个byte在rwnd里面，最开始就加入它吗？
+  auto peeked = reader().peek();
+  auto space = rwnd - NextByte2Sent + LastByteAcked;
+  // 新加入的能够完整存放，就直接一直存,能在这里处理完数据是最好的，也就是触发is_finished而退出，不然就要切割
+  while ( sendMsg.sequence_length() + peeked.size() <= space
+          && peeked.size() + sendMsg.payload.size() <= TCPConfig::MAX_PAYLOAD_SIZE && !peeked.empty() ) {
+    sendMsg.payload += peeked;
+    // 弹出加入的peek部分
+    input_.reader().pop( peeked.size() );
+    // 更新peeked
+    peeked = reader().peek();
+  }
+  // 退出来，检查是否已经把内容吸收完毕,否则需要切割
+  // 理一下思路：如果peek里面有内容，不能直接加入，可以切割，但是这里有细节，
+  // 没接收完成，因为目前已经占满或者有空，只是不够大，但是有FIN，那么FIN退出，加入peeked
+  if ( not peeked.empty() ) {
+    auto size = min( space - sendMsg.sequence_length() + sendMsg.FIN,
+                     TCPConfig::MAX_PAYLOAD_SIZE - sendMsg.payload.size() );
+    peeked = peeked.substr( 0, size ); // 多加入一位，由于FIN产生
+    sendMsg.payload += peeked;
+    input_.reader().pop( peeked.size() );
+    sendMsg.FIN = false;
+  }
+  sendMsg.RST = writer().has_error();
+  sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
+  transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
+  NextByte2Sent += sendMsg.sequence_length();
+  FIN = FIN ? !sendMsg.FIN : false;
+}
 
 void TCPSender::push( const TransmitFunction& transmit )
 {
   TCPSenderMessage sendMsg;
-  if ( ( SYN || reader().bytes_buffered() ) && NextByte2Sent - LastByteAcked < rwnd ) {
-    sendMsg.FIN = false;
+
+  if ( ( SYN || reader().bytes_buffered() || ( writer().is_closed() && FIN ) )
+       && NextByte2Sent - LastByteAcked < rwnd ) {
     sendMsg.SYN = SYN;
     // 在这里要物尽其用的尽可能把数据加入放到一个segment里面，保证window有空和buffer有内容即可,并且大小不能超过设定payload最大值
-    while ( NextByte2Sent - LastByteAcked < rwnd && sendMsg.payload.size() < TCPConfig::MAX_PAYLOAD_SIZE
-            && SYN + reader().bytes_buffered() > 0 ) {
-      // 通过reader读取应用层数据，鉴别是否能完整加入
-      auto peeked = reader().peek();
-      if ( peeked.size() + NextByte2Sent - LastByteAcked + writer().is_closed() > rwnd
-           || peeked.size() + sendMsg.payload.size() > TCPConfig::MAX_PAYLOAD_SIZE ) {
-        auto size = min( (uint64_t)( rwnd + LastByteAcked - NextByte2Sent ),
-                         (uint64_t)( TCPConfig::MAX_PAYLOAD_SIZE - sendMsg.payload.size() ) );
-        // 不能完整加入，需要截断,则不可能是产生FIN的时候,这个地方逻辑后面可以优化
-        peeked = peeked.substr( 0, size );
-        // 因为前面限制得到这里一定能完整传，并且这个时候如果需要传FIN，就把FIN也传了
-      } else if ( writer().is_closed() ) {
-        need2Fin = false;
-        sendMsg.FIN = true;
-      }
-      // 填充发送msg的payload和seqno和RST
-      sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
-      sendMsg.payload += peeked;
-      sendMsg.RST = writer().has_error();
-      // 把这段payload同时放入我们的记录vector里面，因为发送了但是没有接收到ack
-      transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
-      // 更新Nextbyte2sent
-      NextByte2Sent += sendMsg.sequence_length();
-      // 从应用层的bytestream中去掉peeked
-      input_.reader().pop( peeked.size() );
-      if ( sendMsg.payload.size() == TCPConfig::MAX_PAYLOAD_SIZE ) {
-        transmit( sendMsg );
-        sendMsg.payload.clear();
-        sendMsg.FIN = false;
-        sendMsg.SYN = false;
-      }
-      SYN = false;
-    }
-    if ( sendMsg.sequence_length() != 0 ) {
+    do {
+      // 寻找能够加入的最大数据量，每次产生一个能够发送的segment
+      sendMsg.FIN = writer().is_closed();
+      FindMaxSeg( sendMsg );
+      // 发送这个sendMsg
       transmit( sendMsg );
+      // 传送过了，需要清空sendMsg的内容
+      sendMsg.payload.clear();
       SYN = false;
-    }
-  } else if ( writer().is_closed() && need2Fin && rwnd != 0 ) { // 需要发送FIN
-    sendMsg.FIN = true;
-    sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
-    if ( NextByte2Sent - LastByteAcked < rwnd ) {
-      need2Fin = false;
-    } else {
-      return;
-    }
-    // 把这段payload同时放入我们的记录vector里面，因为发送了但是没有接收到ack
-    transmit( sendMsg );
-    transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
-    NextByte2Sent++;
+    } while ( reader().bytes_buffered() != 0 && NextByte2Sent - LastByteAcked < rwnd );
   } else if ( rwnd == 0 && !has_trans_win0_ ) {
     // 特殊情况rwnd为0，那么直接transmit一个byte
     sendMsg.seqno = Wrap32::wrap( NextByte2Sent, isn_ );
@@ -83,7 +78,6 @@ void TCPSender::push( const TransmitFunction& transmit )
       input_.reader().pop( 1 );
     } else {
       sendMsg.FIN = true;
-      need2Fin = false;
     }
     transButUnack.emplace_back( pair { NextByte2Sent, sendMsg } );
     NextByte2Sent++;

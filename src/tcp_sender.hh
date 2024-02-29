@@ -58,8 +58,9 @@ private:
   uint64_t LastByteAcked {0};    //  absolute sequence number denote the latest last bytes that have acked
   // 开一个pair的vector，把在传输层切片但是没有得到ack的数据保存起来
   std::vector<std::pair<uint64_t, TCPSenderMessage>> transButUnack {};
-  bool need2Fin{true};
   bool has_trans_win0_{false};
   bool SYN{true};
+  bool FIN{true};
+  void FindMaxSeg(TCPSenderMessage& sendMsg);
   // void transmitFunc(const TCPSenderMessage& msg);//用在push方法传递的参数
 };

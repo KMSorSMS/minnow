@@ -48,7 +48,7 @@ void NetworkInterface::send_datagram( const InternetDatagram& dgram, const Addre
     waiting_arp_datagram_.emplace( next_hop.ipv4_numeric(), std::move( dgram ) );
 
     if ( arp_request_table_.contains( next_hop.ipv4_numeric() )
-         && arp_request_table_[next_hop.ipv4_numeric()] <= accmulate_time_ ) {
+         && arp_request_table_[next_hop.ipv4_numeric()] >= accmulate_time_ ) {
       return;
     }
     EthernetHeader header
@@ -84,23 +84,26 @@ void NetworkInterface::recv_frame( const EthernetFrame& frame )
     if ( !parse( arpmsg, frame.payload ) ) {
       return;
     }
-    // 如果是回应信息,更新我们的arp表，并且ttl设置为当前的accmulate_time+30000（30s）
+    // 如果是回应/请求信息,都应该更新我们的arp表，并且ttl设置为当前的accmulate_time+30000（30s）
     // 产生对应header
     EthernetHeader header
       = { .dst = arpmsg.sender_ethernet_address, .src = ethernet_address_, .type = EthernetHeader::TYPE_IPv4 };
-    if ( arpmsg.opcode == ARPMessage::OPCODE_REPLY ) {
-      arp_table_.emplace( std::piecewise_construct,
-                          std::forward_as_tuple( arpmsg.sender_ip_address ),
-                          std::forward_as_tuple( accmulate_time_ + 30000, arpmsg.sender_ethernet_address ) );
-      // 从waiting_arp_datagram里面找到所有的ip，将他们全部发送出去：
-      auto range = waiting_arp_datagram_.equal_range( arpmsg.sender_ip_address );
-      for ( auto dgram = range.first; dgram != range.second; ++dgram ) {
-        // 发送对应的datagram
-        transmit( EthernetFrame { .header = header, .payload = serialize( dgram->second ) } );
-      }
-      // 如果是请求信息，要检查目标ip是否是自己
-    } else if ( arpmsg.opcode == ARPMessage::OPCODE_REQUEST
-                && arpmsg.target_ip_address == ip_address_.ipv4_numeric() ) {
+
+    arp_table_.emplace( std::piecewise_construct,
+                        std::forward_as_tuple( arpmsg.sender_ip_address ),
+                        std::forward_as_tuple( accmulate_time_ + 30000, arpmsg.sender_ethernet_address ) );
+    // 还需要从arp_request_table_去掉这个元素（要是有的话）(根据ip删除)
+    arp_request_table_.erase( arpmsg.sender_ip_address );
+    // 从waiting_arp_datagram里面找到所有的ip，将他们全部发送出去：
+    auto range = waiting_arp_datagram_.equal_range( arpmsg.sender_ip_address );
+    for ( auto dgram = range.first; dgram != range.second; ++dgram ) {
+      // 发送对应的datagram
+      transmit( EthernetFrame { .header = header, .payload = serialize( dgram->second ) } );
+    }
+    //记得发过的就删除了
+    waiting_arp_datagram_.erase(arpmsg.sender_ip_address);
+    // 如果是请求信息，要检查目标ip是否是自己
+    if ( arpmsg.opcode == ARPMessage::OPCODE_REQUEST && arpmsg.target_ip_address == ip_address_.ipv4_numeric() ) {
       // 返回arp的信息，保证发送方能够更新arp table
       ARPMessage arpmsg_reply { .opcode = ARPMessage::OPCODE_REPLY,
                                 .sender_ethernet_address = ethernet_address_,
@@ -118,4 +121,13 @@ void NetworkInterface::recv_frame( const EthernetFrame& frame )
 void NetworkInterface::tick( const size_t ms_since_last_tick )
 {
   accmulate_time_ += ms_since_last_tick;
+  // 根据截至时间来清除缓存的一部分arp，通过upper_bound，返回第一个大于给定的当前时间的元素迭代器，这里之前选取的map数据，有待思考
+  for ( auto it = arp_table_.begin(); !arp_table_.empty()&&it != arp_table_.end(); it++ ) {
+    if ( it->second.first <= accmulate_time_ ) { // 除去超时的
+      arp_table_.erase( it );
+    }
+    if(arp_table_.empty()){
+      break;
+    }
+  }
 }

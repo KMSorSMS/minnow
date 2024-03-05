@@ -90,8 +90,8 @@ private:
    * Address)的对应关系以及记录的ttl,打算使用一个map，key为ip，val为pair：ttl和Mac,存活时间只有30s在tick的时候expire过期
    */
   std::map<uint32_t, std::pair<uint64_t, EthernetAddress>> arp_table_ {};
-  // 还需要保存发送的还没有收到回应的arp请求，在5s以内的arp请求不会重复发送
-  std::map<uint32_t, std::pair<uint64_t, EthernetAddress>> arp_request_table_ {};
+  // 还需要保存发送的还没有收到回应的arp请求，在5s以内的arp请求不会重复发送，32位的是ipv4，64位的是ttl
+  std::map<uint32_t, uint64_t > arp_request_table_ {};
   // 缓存因为没找到mac而没发出去的datagram,等收到arp reply的时候再查key(ip32位),这里选择multimap是因为key的ip可能包含多个InternetDatagram，可能有几个datagram都没有等待到mac地址而失去了发送的时机
   std::multimap<uint32_t,InternetDatagram> waiting_arp_datagram_ {};
 };

@@ -58,6 +58,18 @@
 				"check3"
 				],
 			"problemMatcher": [],
+		},
+		{
+			"type": "shell",
+			"label": "run_lab5Check",
+			"command":"cmake",
+			"args": [
+				"--build",
+				"${workspaceFolder}/build",
+				"--target",
+				"check5"
+				],
+			"problemMatcher": [],
 		}
 	]
 }

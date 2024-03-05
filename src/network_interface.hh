@@ -1,9 +1,13 @@
 #pragma once
 
+#include <cstdint>
+#include <map>
 #include <queue>
+#include <utility>
 
 #include "address.hh"
 #include "ethernet_frame.hh"
+#include "ethernet_header.hh"
 #include "ipv4_datagram.hh"
 
 // A "network interface" that connects IP (the internet layer, or network layer)
@@ -81,4 +85,13 @@ private:
 
   // Datagrams that have been received
   std::queue<InternetDatagram> datagrams_received_ {};
+  uint64_t accmulate_time_ { 0 };
+  /* 这里需要保存arp表，是ip和mac(Ethernet
+   * Address)的对应关系以及记录的ttl,打算使用一个map，key为ip，val为pair：ttl和Mac,存活时间只有30s在tick的时候expire过期
+   */
+  std::map<uint32_t, std::pair<uint64_t, EthernetAddress>> arp_table_ {};
+  // 还需要保存发送的还没有收到回应的arp请求，在5s以内的arp请求不会重复发送
+  std::map<uint32_t, std::pair<uint64_t, EthernetAddress>> arp_request_table_ {};
+  // 缓存因为没找到mac而没发出去的datagram,等收到arp reply的时候再查key(ip32位),这里选择multimap是因为key的ip可能包含多个InternetDatagram，可能有几个datagram都没有等待到mac地址而失去了发送的时机
+  std::multimap<uint32_t,InternetDatagram> waiting_arp_datagram_ {};
 };

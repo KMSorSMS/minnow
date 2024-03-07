@@ -1,9 +1,13 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "exception.hh"
+#include "ipv4_datagram.hh"
 #include "network_interface.hh"
 
 // \brief A router that has multiple network interfaces and
@@ -35,4 +39,14 @@ public:
 private:
   // The router's collection of network interfaces
   std::vector<std::shared_ptr<NetworkInterface>> _interfaces {};
+  // 创建一个结构体保存单个route的信息
+  typedef struct router_tuple
+  {
+    uint32_t route_prefix;
+    uint8_t prefix_length;
+    std::optional<Address> next_hop;
+    size_t interface_num;
+  } router_tuple;
+  std::vector<router_tuple> router_table {};
+  void choose_interface_transmit( InternetDatagram& dgram );
 };

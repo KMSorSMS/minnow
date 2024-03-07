@@ -70,6 +70,18 @@
 				"check5"
 				],
 			"problemMatcher": [],
+		},
+		{
+			"type": "shell",
+			"label": "run_lab6Check",
+			"command":"cmake",
+			"args": [
+				"--build",
+				"${workspaceFolder}/build",
+				"--target",
+				"check6"
+				],
+			"problemMatcher": [],
 		}
 	]
 }

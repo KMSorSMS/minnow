@@ -28,6 +28,7 @@ void get_URL( const string& host, const string& path )
     tsocket.read( buffer );
     cout << buffer;
   }
+  tsocket.wait_until_closed();
 }
 
 int main( int argc, char* argv[] )
